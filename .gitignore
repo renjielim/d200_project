@@ -31,7 +31,6 @@ ENV/
 .ipynb_checkpoints/
 
 # Data / outputs
-*.csv
 *.tsv
 *.parquet
 *.feather
