@@ -9,3 +9,13 @@ ipykernel
 torch
 openpyxl #open excel files
 yfinance
+statsmodels
+darts
+statsforecast
+xgboost
+pytorch-lightning
+huggingface_hub
+transformers
+accelerate
+safetensors
+sentencepiece
