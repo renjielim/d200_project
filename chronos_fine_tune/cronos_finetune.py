@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,10 @@ from darts import TimeSeries, concatenate
 from darts.metrics import mae, mape, rmse
 from darts.models import Chronos2Model
 from pytorch_lightning.callbacks import Callback
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from functions.analysis_functions import evaluation
 
@@ -25,7 +30,7 @@ class TrainLossPrinter(Callback):
 
 
 def main() -> None:
-    repo_root = Path(__file__).parent
+    repo_root = PROJECT_ROOT
     out_dir = repo_root / "logs"
     out_dir.mkdir(exist_ok=True)
 
@@ -60,25 +65,17 @@ def main() -> None:
     X_train_ts = X_full_ts[:train_end]
     y_test_ts = y_full_ts[train_end : train_end + H]
 
-    # Partial fine-tuning: keep most of Chronos frozen and only update the
-    # last two encoder blocks plus the final normalization/output head.
-    chronos_unfreeze_patterns = [
-        "encoder.block.4.*",
-        "encoder.block.5.*",
-        "encoder.final_layer_norm.*",
-        "output_patch_embedding.*",
-    ]
     train_loss_printer = TrainLossPrinter()
 
     chronos_ft_model = Chronos2Model(
         input_chunk_length=12,
         output_chunk_length=1,
         hub_model_name="autogluon/chronos-2-small",
-        enable_finetuning={"unfreeze": chronos_unfreeze_patterns},
-        batch_size=16,
+        enable_finetuning=True,
+        batch_size=32,
         loss_fn=nn.L1Loss(),
         optimizer_cls=torch.optim.AdamW,
-        optimizer_kwargs={"lr": 1e-4},
+        optimizer_kwargs={"lr": 1e-3},
         random_state=42,
         pl_trainer_kwargs={
             "accelerator": "cpu",
@@ -90,11 +87,11 @@ def main() -> None:
         },
     )
 
-    # Fine-tune for exactly 10 epochs.
+    # Fine-tune for exactly 20 epochs.
     chronos_ft_model.fit(
         series=y_train_ts,
         past_covariates=X_train_ts,
-        epochs=10,
+        epochs=3,
         verbose=True,
     )
 
@@ -115,29 +112,32 @@ def main() -> None:
         name="chronos2_ft_pred",
     )
 
-    print("Chronos-2 fine-tuned (5 epochs, last layers unfrozen) 1-step walk-forward metrics on growth_rate:")
+    print("Chronos-2 full fine-tuned 1-step walk-forward metrics on growth_rate:")
     print(f"MAE  : {mae(y_test_ts, chronos_ft_pred_ts):.6f}")
     print(f"RMSE : {rmse(y_test_ts, chronos_ft_pred_ts):.6f}")
 
     chronos_ft_eval = evaluation(
-        model_name="Chronos2_FT_5ep_last_layers",
+        model_name="Chronos2_FT_full",
         y_true=y_test,
         y_pred=chronos_ft_pred,
         prev_levels_test=prev_levels_test,
         actual_levels_test=actual_levels_test,
     )
 
-    chronos_ft_eval.to_csv(out_dir / "chronos_finetune_eval.csv", index=False)
+    eval_out_path = out_dir / "chronos_finetune_eval.csv"
+    pred_out_path = out_dir / "chronos_finetune_preds.csv"
+
+    chronos_ft_eval.to_csv(eval_out_path, index=False)
     pd.DataFrame(
         {
             "t": y_test.index,
             "y_true_growth": y_test.values,
             "y_pred_growth": chronos_ft_pred.values,
         }
-    ).to_csv(out_dir / "chronos_finetune_preds.csv", index=False)
+    ).to_csv(pred_out_path, index=False)
 
-    print(f"Saved evaluation: {out_dir / 'chronos_finetune_eval.csv'}")
-    print(f"Saved predictions: {out_dir / 'chronos_finetune_preds.csv'}")
+    print(f"Saved evaluation: {eval_out_path}")
+    print(f"Saved predictions: {pred_out_path}")
 
 
 if __name__ == "__main__":

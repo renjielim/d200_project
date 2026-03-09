@@ -45,4 +45,4 @@ export TOKENIZERS_PARALLELISM=false
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
 
-python cronos_finetune.py
+python "$SLURM_SUBMIT_DIR/chronos_fine_tune/cronos_finetune.py"
