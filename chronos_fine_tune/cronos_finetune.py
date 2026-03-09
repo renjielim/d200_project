@@ -2,12 +2,26 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 import torch.nn as nn
 from darts import TimeSeries, concatenate
 from darts.metrics import mae, mape, rmse
 from darts.models import Chronos2Model
+from pytorch_lightning.callbacks import Callback
 
 from functions.analysis_functions import evaluation
+
+
+class TrainLossPrinter(Callback):
+    def on_train_epoch_end(self, trainer, pl_module) -> None:
+        train_loss = trainer.callback_metrics.get("train_loss")
+        if train_loss is None:
+            return
+
+        if hasattr(train_loss, "item"):
+            train_loss = train_loss.item()
+
+        print(f"Epoch {trainer.current_epoch + 1}: train_loss={train_loss:.6f}")
 
 
 def main() -> None:
@@ -46,13 +60,24 @@ def main() -> None:
     X_train_ts = X_full_ts[:train_end]
     y_test_ts = y_full_ts[train_end : train_end + H]
 
+    # Partial fine-tuning: keep most of Chronos frozen and only update the
+    # last two encoder blocks plus the final normalization/output head.
+    chronos_unfreeze_patterns = [
+        "encoder.block.4.*",
+        "encoder.block.5.*",
+        "encoder.final_layer_norm.*",
+        "output_patch_embedding.*",
+    ]
+    train_loss_printer = TrainLossPrinter()
+
     chronos_ft_model = Chronos2Model(
-        input_chunk_length=32,
+        input_chunk_length=12,
         output_chunk_length=1,
         hub_model_name="autogluon/chronos-2-small",
-        enable_finetuning=True,
+        enable_finetuning={"unfreeze": chronos_unfreeze_patterns},
         batch_size=16,
         loss_fn=nn.L1Loss(),
+        optimizer_cls=torch.optim.AdamW,
         optimizer_kwargs={"lr": 1e-4},
         random_state=42,
         pl_trainer_kwargs={
@@ -61,14 +86,15 @@ def main() -> None:
             "gradient_clip_val": 1.0,
             "enable_progress_bar": True,
             "log_every_n_steps": 25,
+            "callbacks": [train_loss_printer],
         },
     )
 
-    # Fine-tune for exactly 3 epochs.
+    # Fine-tune for exactly 10 epochs.
     chronos_ft_model.fit(
         series=y_train_ts,
         past_covariates=X_train_ts,
-        epochs=5,
+        epochs=10,
         verbose=True,
     )
 
@@ -89,12 +115,12 @@ def main() -> None:
         name="chronos2_ft_pred",
     )
 
-    print("Chronos-2 fine-tuned (3 epochs) 1-step walk-forward metrics on growth_rate:")
+    print("Chronos-2 fine-tuned (5 epochs, last layers unfrozen) 1-step walk-forward metrics on growth_rate:")
     print(f"MAE  : {mae(y_test_ts, chronos_ft_pred_ts):.6f}")
     print(f"RMSE : {rmse(y_test_ts, chronos_ft_pred_ts):.6f}")
 
     chronos_ft_eval = evaluation(
-        model_name="Chronos2_FT_3ep",
+        model_name="Chronos2_FT_5ep_last_layers",
         y_true=y_test,
         y_pred=chronos_ft_pred,
         prev_levels_test=prev_levels_test,

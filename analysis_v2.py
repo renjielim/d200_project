@@ -6,18 +6,27 @@ import tempfile
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+import torch
+import torch.nn as nn
 
+from darts import TimeSeries
+from darts.dataprocessing.transformers import Scaler
 from darts.models import (
     AutoARIMA,
+    BlockRNNModel,
     NaiveSeasonal,
     RandomForestModel,
     SKLearnModel,
+    TiDEModel,
     TSMixerModel,
     XGBModel,
 )
+from darts.models.forecasting.block_rnn_model import CustomBlockRNNModule
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from scipy.stats import wilcoxon
 from sklearn.linear_model import ElasticNet
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.svm import SVR
 
 from functions.analysis_functions import (
@@ -66,6 +75,17 @@ assert X_train.isna().sum().sum() == 0
 assert y_train.isna().sum() == 0
 assert y_test.isna().sum() == 0
 
+#%%Chronos predictions (ran in CSD3)
+chronos = pd.read_csv(REPO_ROOT / "chronos_fine_tune" / "chronos_finetune_preds.csv", index_col=0)
+chronos_pred = chronos["y_pred_growth"].astype(np.float32)
+
+chronos_eval = evaluation(
+    model_name="Chronos",
+    y_true=y_test,
+    y_pred=chronos_pred,
+    prev_levels_test=prev_levels_test,
+    actual_levels_test=actual_levels_test,
+)
 #%%
 # AutoArima
 
@@ -164,9 +184,9 @@ xgb_base_params = dict(
 )
 
 xgb_param_grid = {
-    "max_depth": [3, 5, 7],
-    "learning_rate": [0.01, 0.05, 0.1],
-    "n_estimators": [100, 200, 300],
+    "max_depth": [3, 5],
+    "learning_rate": [0.01, 0.05],
+    "n_estimators": [200, 500],
     "subsample": [0.8, 1.0],
     "colsample_bytree": [0.6, 0.8, 1.0],
     "reg_alpha": [0.1, 0.3, 0.5],
@@ -335,7 +355,7 @@ xgb_eval_sigmoid = evaluation(
 
 
 eval_df = pd.concat(
-    [arima_eval, enet_eval, xgb_eval, rf_eval, svr_eval, xgb_eval_sigmoid],
+    [arima_eval, enet_eval, xgb_eval, rf_eval, svr_eval, xgb_eval_sigmoid, chronos_eval],
     ignore_index=True,
 )
 #%%
@@ -416,7 +436,7 @@ profit_arima = mean_expected_profit_sigmoid(
 
 # %%
 # 1. Calculate the difference in profit for each auction
-d = np.array(profit_xgb_sigmoid) - np.array(profit_rw)
+d = np.array(profit_xgb) - np.array(profit_rw)
 constant = np.ones(len(d))
 model = sm.OLS(endog=d, exog=constant)
 hac_results = model.fit(cov_type='HAC', cov_kwds={'maxlags': 1})
@@ -439,8 +459,8 @@ print(f"P-Value: {p_value:.4f}")
 
 # %%
 # xgb_model is the fitted Darts XGBModel returned by darts_pipeline
-importances = xgb_model_sigmoid.model.feature_importances_          # from XGBoost
-feat_names = xgb_model_sigmoid.lagged_feature_names                # from Darts (public attr)
+importances = xgb_model.model.feature_importances_          # from XGBoost
+feat_names = xgb_model.lagged_feature_names                # from Darts (public attr)
 
 fi = (
     pd.DataFrame({"feature": feat_names, "importance": importances})
@@ -451,129 +471,4 @@ fi = (
 print(fi.head(30))
 
 
-#%%
-# ===================== Chronos-2 Zero-Shot + Walk-Forward Test =====================
-from darts import TimeSeries, concatenate
-from darts.metrics import mae, mape, rmse
-from darts.models import Chronos2Model
-
-# Build full series once, then slice by train/test boundary.
-y_full_ts = TimeSeries.from_values(y.values.astype(np.float32), columns=["y"])
-X_full_ts = TimeSeries.from_values(X.values.astype(np.float32), columns=X.columns.tolist())
-
-train_end = len(y_train)
-y_train_ts = y_full_ts[:train_end]
-X_train_ts = X_full_ts[:train_end]
-y_test_ts = y_full_ts[train_end:train_end + H]
-
-# Zero-shot Chronos-2 model (no fine-tuning).
-chronos_model = Chronos2Model(
-    input_chunk_length=32,
-    output_chunk_length=1,
-    hub_model_name="autogluon/chronos-2-small",
-    enable_finetuning=False,
-    batch_size=64,
-    random_state=42,
-    pl_trainer_kwargs={
-        "accelerator": "cpu",
-        "devices": 1,
-        "gradient_clip_val": 1.0,
-        "enable_progress_bar": True,
-        "log_every_n_steps": 25,
-    },
-)
-
-# Darts global models require `fit()` before `predict()`.
-# With `enable_finetuning=False`, this initializes the model without fine-tuning.
-chronos_model.fit(
-    series=y_train_ts,
-    past_covariates=X_train_ts,
-    verbose=True,
-)
-
-# 1-step-ahead expanding-window walk-forward over the full test horizon.
-chronos_preds = []
-for i in range(H):
-    end = train_end + i
-    y_hist = y_full_ts[:end]  # includes info up to t-1
-    X_hist = X_full_ts[:end]  # past covariates only up to t-1
-    chronos_preds.append(
-        chronos_model.predict(n=1, series=y_hist, past_covariates=X_hist)
-    )
-
-chronos_pred_ts = concatenate(chronos_preds, axis=0)
-chronos_pred = pd.Series(
-    chronos_pred_ts.univariate_values().astype(np.float32),
-    index=y_test.index,
-    name="chronos2_pred",
-)
-
-print("Chronos-2 zero-shot 1-step walk-forward metrics on growth_rate:")
-print(f"MAE  : {mae(y_test_ts, chronos_pred_ts):.6f}")
-print(f"RMSE : {rmse(y_test_ts, chronos_pred_ts):.6f}")
-
-
-chronos_eval = evaluation(
-    model_name="Chronos2_ZeroShot",
-    y_true=y_test,
-    y_pred=chronos_pred,
-    prev_levels_test=prev_levels_test,
-    actual_levels_test=actual_levels_test,
-)
-
-
-#%% ===================== Chronos-2 Fine-Tuning (3 epochs) + Walk-Forward Test =====================
-import torch.nn as nn
-
-chronos_ft_model = Chronos2Model(
-    input_chunk_length=32,
-    output_chunk_length=1,
-    hub_model_name="autogluon/chronos-2-small",
-    enable_finetuning=True,
-    batch_size=64,
-    loss_fn=nn.L1Loss(),
-    optimizer_kwargs={"lr": 1e-4},
-    random_state=42,
-    pl_trainer_kwargs={
-        "accelerator": "cpu",
-        "devices": 1,
-        "gradient_clip_val": 1.0,
-        "enable_progress_bar": True,
-        "log_every_n_steps": 25,
-    },
-)
-
-chronos_ft_model.fit(
-    series=y_train_ts,
-    past_covariates=X_train_ts,
-    epochs=3,
-    verbose=True,
-)
-
-chronos_ft_preds = []
-for i in range(H):
-    end = train_end + i
-    y_hist = y_full_ts[:end]
-    X_hist = X_full_ts[:end]
-    chronos_ft_preds.append(
-        chronos_ft_model.predict(n=1, series=y_hist, past_covariates=X_hist)
-    )
-
-chronos_ft_pred_ts = concatenate(chronos_ft_preds, axis=0)
-chronos_ft_pred = pd.Series(
-    chronos_ft_pred_ts.univariate_values().astype(np.float32),
-    index=y_test.index,
-    name="chronos2_ft_pred",
-)
-
-print("Chronos-2 fine-tuned (3 epochs) 1-step walk-forward metrics on growth_rate:")
-print(f"MAE  : {mae(y_test_ts, chronos_ft_pred_ts):.6f}")
-print(f"RMSE : {rmse(y_test_ts, chronos_ft_pred_ts):.6f}")
-
-chronos_ft_eval = evaluation(
-    model_name="Chronos2_FT_3ep",
-    y_true=y_test,
-    y_pred=chronos_ft_pred,
-    prev_levels_test=prev_levels_test,
-    actual_levels_test=actual_levels_test,
-)
+# %%

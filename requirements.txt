@@ -1,3 +1,4 @@
+## Core project dependencies
 numpy
 pandas
 scipy
@@ -6,17 +7,18 @@ matplotlib
 seaborn
 jupyter
 ipykernel
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.10.0+cpu
-openpyxl #open excel files
+torch==2.10.0
+openpyxl 
 yfinance
 statsmodels
 darts
 statsforecast
 xgboost
 pytorch-lightning
-huggingface_hub
-transformers
-accelerate
-safetensors
-sentencepiece
+
+## Optional: Chronos-only dependencies
+# huggingface_hub
+# transformers
+# accelerate
+# safetensors
+# sentencepiece
