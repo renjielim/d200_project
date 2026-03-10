@@ -18,6 +18,10 @@ def evaluation(
     prev_levels_test = None,
     actual_levels_test = None,
 ):
+    ''' 
+    Input growth rate predictions, reconstruction absolute levels and then evaluate on RMSE and MAE
+    '''
+
     if (prev_levels_test is None or actual_levels_test is None):
         raise ValueError("Must provide prev_levels_test and actual_levels_test for regression evaluation.")
     
@@ -277,7 +281,7 @@ def darts_pipeline(
         return best_params
 
     # ----------------- initial tuning -----------------
-    print("--- initial tuning (past_covariates only) ---")
+    print("--- initial tuning ---")
     best_params = _tune(X_train, y_train)
     print("best_params:", best_params)
 
@@ -294,8 +298,8 @@ def darts_pipeline(
             print("new best_params:", best_params)
 
         # next realized point (unknown at forecast time)
-        X_t = None if curr_X is None else X_test.iloc[i:i+1]   # X at time t (UNKNOWN at prediction time)
-        y_t = y_test.iloc[i:i+1]                               # y at time t (to be predicted)
+        X_t = None if curr_X is None else X_test.iloc[i:i+1]  
+        y_t = y_test.iloc[i:i+1]                              
 
         # scale on expanding window using data up to t-1 ONLY
         curr_X_p, curr_y_p, ysc = _prep_current_window(curr_X, curr_y)
@@ -322,7 +326,7 @@ def darts_pipeline(
 
         preds.append(pred)
 
-        # AFTER y_t is observed, we can append (X_t, y_t) to training
+        # append (X_t, y_t) to training
         curr_y = pd.concat([curr_y, y_t])
         if curr_X is not None:
             curr_X = pd.concat([curr_X, X_t])
@@ -344,6 +348,9 @@ def darts_pipeline(
     return pd.Series(preds, index=y_test.index), last_trained_model
 
 def mean_expected_profit_sigmoid(actual, pred, prev_levels, steepness=0.001, max_demand=1, base_margin=2000, full_list=False):
+    '''
+    Expected profit using a Sigmoid demand curve based on assumed set up. Full_list is when i want profit per period. 
+    '''
     actual = np.asarray(actual, dtype=float)
     pred = np.asarray(pred, dtype=float)
     prev = np.asarray(prev_levels, dtype=float) 
@@ -360,9 +367,9 @@ def mean_expected_profit_sigmoid(actual, pred, prev_levels, steepness=0.001, max
         price_t_next = actual[t + 1]
         
         expected_market_price = prev[t]  
-        inflection_point = expected_market_price # The point where demand starts to drop significantly
+        inflection_point = expected_market_price #just anchor on past price
         
-        # Sigmoid demand curve
+        # sigmoid demand curve
         demand = max_demand / (1 + np.exp(steepness * (base_margin +budget - inflection_point)))
         
         if budget < price_t:
@@ -376,38 +383,39 @@ def mean_expected_profit_sigmoid(actual, pred, prev_levels, steepness=0.001, max
         return expected_profits
     else:
         return float(np.mean(expected_profits))
+
 def evaluate_expected_profit_sigmoid(actual, pred, prev_levels, model_name="Model", steepness=0.001, base_margin=2000):
     mean_profit = mean_expected_profit_sigmoid(
         actual=actual, pred=pred, prev_levels=prev_levels, 
         steepness=steepness, base_margin=base_margin
     )
     return {"Model": model_name, "Net Expected Profit (SGD)": round(mean_profit, 2)}
+
 def profit_cv_score_sigmoid(y_true_growth, y_pred_growth, prev_levels_lookup, steepness=0.001, max_demand=1, base_margin=2000):
     """
     Scoring metric for CV: converts growth-rate predictions to absolute levels, 
-    then scores expected profit using your Sigmoid demand curve.
+    then scores expected profit.
     Returns negative mean profit because hyperparameter search algorithms minimize the score.
     """
-    # 1. Convert to Pandas Series for safe alignment
+    # safe alignment
     y_true_s = pd.Series(y_true_growth).astype(float)
     y_pred_s = pd.Series(y_pred_growth, index=y_true_s.index).astype(float)
     prev_s = pd.Series(prev_levels_lookup).reindex(y_true_s.index).astype(float)
 
-    # 2. Drop any missing overlapping indices
+    # drop any missing overlapping indices
     valid = prev_s.notna() & y_true_s.notna() & y_pred_s.notna()
     y_true_s = y_true_s[valid]
     y_pred_s = y_pred_s[valid]
     prev_s = prev_s[valid]
 
-    # Need at least 2 points to calculate t and t+1
     if len(y_true_s) < 2:
         return float("inf")
 
-    # 3. Reconstruct absolute SGD levels from % growth rates
+    # reconstruct levels 
     actual_levels = prev_s * (1.0 + y_true_s / 100.0)
     pred_levels = prev_s * (1.0 + y_pred_s / 100.0)
 
-    # 4. Calculate profit using your exact Sigmoid function
+    # calculate profit
     mean_profit = mean_expected_profit_sigmoid(
         actual=actual_levels.values,
         pred=pred_levels.values,
@@ -420,7 +428,7 @@ def profit_cv_score_sigmoid(y_true_growth, y_pred_growth, prev_levels_lookup, st
     if np.isnan(mean_profit):
         return float("inf")
 
-    # 5. Return NEGATIVE profit so grid search (minimizer) maximizes your money
+    # 5. return NEGATIVE profit
     return -mean_profit
 
 def plot_profit_curves_sigmoid(
@@ -431,27 +439,23 @@ def plot_profit_curves_sigmoid(
     num_points=100
 ):
     """
-    Evaluates profit across varying Sigmoid steepness (elasticity) 
+    Evaluates profit across varying k 
     """
-    # 1. Convert directly to numpy arrays
     true_test_actual = np.asarray(actual_levels)
     true_test_prev = np.asarray(prev_levels)
-    
-    # 2. Define the realistic range for S-Curve steepness (k)
     steepness_to_test = np.linspace(0.0001, 0.0025, num_points)
+
     plt.figure(figsize=(12, 7))
     
-    # 3. Process each model
+    # evaluate profits on each model at the range of k
     for model_name, config in models_dict.items():
         color = config['color']
         true_test_pred = np.asarray(config['preds'])
         
         profits = []
-        
-        # --- THE EVALUATION LOOP ---
+
         for k in steepness_to_test:
             
-            # Evaluate predictions on the entire test set
             res = evaluate_expected_profit_sigmoid(
                 actual=true_test_actual, 
                 pred=true_test_pred, 
@@ -462,10 +466,8 @@ def plot_profit_curves_sigmoid(
             )
             profits.append(res["Net Expected Profit (SGD)"])
             
-        # Add lines to the plot
         plt.plot(steepness_to_test, profits, label=f'{model_name}', color=color, linewidth=2.5)
 
-    # --- Formatting the Chart ---
     plt.axhline(0, color='red', linestyle='--', linewidth=2, label='Break-Even (0 Profit)')
     
     plt.title(f'Profit Over Varying Customer Elasticity (Sigmoid S-Curve)\n(${base_margin} Base Margin, All 96 Observations)', fontsize=14)
@@ -479,11 +481,9 @@ def plot_profit_curves_sigmoid(
     plt.show()
 
 def diebold_mariano_test(actual, pred1, pred2, loss='abs'):
-    # 1. Calculate level errors
     e1 = actual - pred1
     e2 = actual - pred2
-    
-    # 2. Calculate the loss differential
+
     if loss == 'abs':
         d = np.abs(e1) - np.abs(e2)
     elif loss == 'sqr':
@@ -491,39 +491,17 @@ def diebold_mariano_test(actual, pred1, pred2, loss='abs'):
     else:
         raise ValueError("Loss must be 'abs' or 'sqr'")
         
-    # 3. Calculate mean and variance of the differential
     mean_d = np.mean(d)
     T = float(len(d))
     
-    # Variance of the loss differential (ddof=0 for population variance)
     var_d = np.var(d, ddof=0)
-    
-    # 4. Calculate DM Statistic and p-value
-    # Note: This is for 1-step ahead forecasts. 
+
     dm_stat = mean_d / np.sqrt(var_d / T)
     
-    # Two-tailed p-value
+    # two-tailed p-value
     p_value = 2 * (1 - norm.cdf(abs(dm_stat)))
     
     return dm_stat, p_value
-def error_plot(
-    actual_levels_test, 
-    baseline_pred, 
-    challenger_pred, 
-    date_real
-):
-    loss_diff = np.abs(actual_levels_test - baseline_pred) - np.abs(actual_levels_test - challenger_pred)
-    test_dates = date_real[-len(loss_diff):]
-
-    plt.figure(figsize=(14, 6))
-    colors = ['#3498db' if val > 0 else '#e74c3c' for val in loss_diff]
-    plt.bar(test_dates, loss_diff, color=colors, width=15)
-    plt.axhline(0, color='black', linewidth=1)
-    plt.title('Absolute Loss Differential (Positive = Challenger Win)')
-    plt.xlabel('Date')
-    plt.ylabel('Error Reduction (Challenger Error - Baseline Error)')
-    plt.grid(axis='y', alpha=0.3)
-    plt.show()
 
 def plot_test(
     y_true,
@@ -536,6 +514,9 @@ def plot_test(
     y_pred_2_label="Predicted 2",
     date_real=None,
 ):
+    '''
+    Plot actual vs predicted. Can plot up to 2 sets of predictions.
+    '''
     # choose x-axis
     if date_real is not None:
         x_axis = pd.Series(date_real).loc[y_true.index].values

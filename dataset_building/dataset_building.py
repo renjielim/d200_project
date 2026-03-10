@@ -1,6 +1,5 @@
 # %%
 import pandas as pd
-from pathlib import Path
 import yfinance as yf
 
 import sys
@@ -8,16 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-import importlib
-import functions.data_cleaning_function as dcf
-importlib.reload(dcf)
-
-
 from functions.data_cleaning_function import add_growth_rate_columns
-
-# %load_ext autoreload
-# %autoreload 2
-
 
 #%%
 #import files
@@ -180,29 +170,6 @@ df = (
       .sort_index()
       .reset_index(drop=True)
 )
-# %%
-#clean car age data REMOVE, yearly data no variation
-# car_age = car_age.iloc[8:].reset_index(drop=True)
-# car_age.columns = car_age.iloc[0]
-# car_age = car_age.drop(0).reset_index(drop=True)
-
-# car_age = car_age.iloc[:34].reset_index(drop=True) #keep data from 1991 jan onwards
-# #drop column 1
-# car_age = car_age.drop(car_age.columns[1], axis=1)
-# car_age = car_age.rename(columns={car_age.columns[0]: 'date'})
-# #set all columns except date to numeric
-# car_age.iloc[:, 1:] = car_age.iloc[:, 1:].apply(pd.to_numeric)
-# #sum across columns 1 to 10 to get car age younger than 10 years, and sum across columns 11 to the end to get car age older than 10 years
-# car_age['car_age_younger_than_10'] = car_age.iloc[:, 1:11].sum(axis=1)
-# car_age['car_age_older_than_10'] = car_age.iloc[:, 11:].sum(axis=1)
-# car_age = car_age[['date', 'car_age_younger_than_10', 'car_age_older_than_10']]
-# # prepare car_age (its `date` is year-only)
-# car_age = car_age.rename(columns={"date": "year"})
-
-# car_age["year"] = pd.to_numeric(car_age["year"], errors="coerce").astype("Int64")
-# df["year"] = pd.to_datetime(df["date"], errors="coerce").dt.year.astype("Int64")
-
-# df = df.merge(car_age, on="year", how="left")
 
 #%% clean pqp data
 pqp = pqp.iloc[9:].reset_index(drop=True)

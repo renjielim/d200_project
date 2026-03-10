@@ -11,6 +11,10 @@ def add_growth_rate_columns(
     as_percent=True,
     drop_original=False,
 ):
+    '''
+    Add growth rate columns to df based on specified columns.
+    Note shift is negative because data is arranged from newest to oldest.
+    '''
     for col in columns:
         base = pd.to_numeric(df[col], errors="coerce")
         growth = (base - base.shift(shift_period)) / base.shift(shift_period)

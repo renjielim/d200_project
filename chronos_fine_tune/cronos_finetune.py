@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from darts import TimeSeries, concatenate
-from darts.metrics import mae, mape, rmse
+from darts.metrics import mae, rmse
 from darts.models import Chronos2Model
 from pytorch_lightning.callbacks import Callback
 
@@ -34,7 +34,6 @@ def main() -> None:
     out_dir = repo_root / "logs"
     out_dir.mkdir(exist_ok=True)
 
-    # Dataset prep (mirrors analysis_v2.py)
     df_nn = pd.read_csv(repo_root / "final_dataset_nn.csv")
     df_nn["date"] = pd.to_datetime(df_nn["date"])
     df_nn = df_nn.sort_values("date").set_index("date")
@@ -57,7 +56,7 @@ def main() -> None:
     prev_levels_test = df_nn["prev_quota_premium"].iloc[-H:]
     actual_levels_test = df_nn["quota_premium"].iloc[-H:]
 
-    # Chronos setup
+    # setup
     y_full_ts = TimeSeries.from_values(y.values.astype(np.float32), columns=["y"])
     X_full_ts = TimeSeries.from_values(X.values.astype(np.float32), columns=X.columns.tolist())
     train_end = len(y_train)
@@ -87,7 +86,6 @@ def main() -> None:
         },
     )
 
-    # Fine-tune for exactly 20 epochs.
     chronos_ft_model.fit(
         series=y_train_ts,
         past_covariates=X_train_ts,
@@ -95,7 +93,6 @@ def main() -> None:
         verbose=True,
     )
 
-    # 1-step walk-forward inference on test horizon.
     chronos_ft_preds = []
     for i in range(H):
         end = train_end + i

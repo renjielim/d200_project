@@ -1,16 +1,10 @@
 #%%
-import os
-import warnings
 from pathlib import Path
-import tempfile
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-import torch
-import torch.nn as nn
 
 from darts import TimeSeries
-from darts.dataprocessing.transformers import Scaler
 from darts.explainability.shap_explainer import ShapExplainer
 from darts.models import (
     AutoARIMA,
@@ -19,7 +13,6 @@ from darts.models import (
     SKLearnModel,
     XGBModel,
 )
-from scipy.stats import wilcoxon
 from sklearn.linear_model import ElasticNet
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 from sklearn.svm import SVR
@@ -27,7 +20,6 @@ from sklearn.svm import SVR
 from functions.analysis_functions import (
     darts_pipeline,
     diebold_mariano_test,
-    error_plot,
     evaluation,
     mean_expected_profit_sigmoid,
     plot_profit_curves_sigmoid,
@@ -194,7 +186,7 @@ xgb_pred, xgb_model = darts_pipeline(
     X_train=X_train, y_train=y_train,
     X_test=X_test, y_test=y_test,
     param_grid=xgb_param_grid,
-    scale_features=False,    # trees don't need scaling
+    scale_features=False,   
     scale_target=False,
     n_splits=3,
     scoring_metric=mean_absolute_error,
@@ -230,7 +222,7 @@ rf_pred, rf_model = darts_pipeline(
     X_train=X_train, y_train=y_train,
     X_test=X_test, y_test=y_test,
     param_grid=rf_param_grid,
-    scale_features=False,     # trees don't need scaling
+    scale_features=False,    
     scale_target=False,
     n_splits=3,
     scoring_metric=mean_absolute_error,
@@ -239,8 +231,8 @@ rf_pred, rf_model = darts_pipeline(
 
 #%% svr
 svr_base_params = dict(
-    lags=12,                   # y_{t-1}..y_{t-12}
-    lags_past_covariates=12,   # X_{t-1}..X_{t-12}
+    lags=12,                   
+    lags_past_covariates=12,   
     output_chunk_length=1,
     model=SVR(
         kernel="rbf",
@@ -263,7 +255,7 @@ svr_pred, svr_model = darts_pipeline(
     X_train=X_train, y_train=y_train,
     X_test=X_test, y_test=y_test,
     param_grid=svr_param_grid,
-    scale_features=True,      # important for SVR
+    scale_features=True,     
     scale_target=False,
     n_splits=3,
     scoring_metric=mean_absolute_error,
@@ -379,13 +371,6 @@ diebold_mariano_test(actual_levels_test, xgb_pred_levels, arima_pred_levels, los
 
 diebold_mariano_test(actual_levels_test, xgb_pred_sigmoid_levels, rw_pred, loss='abs')
 diebold_mariano_test(actual_levels_test, xgb_pred_sigmoid_levels, arima_pred_levels, loss='abs')
-#%%
-error_plot(
-    actual_levels_test=actual_levels_test,
-    baseline_pred=arima_pred_levels,
-    challenger_pred=xgb_pred_sigmoid_levels,
-    date_real=date_real
-)
 
 # %%
 plot_profit_curves_sigmoid(
@@ -399,8 +384,7 @@ plot_profit_curves_sigmoid(
     },
     base_margin=2000)
 
-#%% profit curve for different margins
-# %%
+# %% test if profit is significantly higher
 profit_xgb = mean_expected_profit_sigmoid(
     actual=actual_levels_test,
     pred=xgb_pred_levels,
@@ -443,8 +427,8 @@ profit_arima = mean_expected_profit_sigmoid(
 mean_profit_arima = np.mean(profit_arima)
 
 # %%
-# 1. Calculate the difference in profit for each auction
-d = np.array(profit_xgb) - np.array(profit_rw)
+# calculate the difference in profit 
+d = np.array(profit_xgb_sigmoid) - np.array(profit_rw)
 constant = np.ones(len(d))
 model = sm.OLS(endog=d, exog=constant)
 hac_results = model.fit(cov_type='HAC', cov_kwds={'maxlags': 1})
@@ -456,110 +440,65 @@ print(f"Diebold-Mariano Statistic: {dm_stat:.4f}")
 print(f"P-Value: {p_value:.4f}")
 
 
+
 # %%
-# xgb_model is the fitted Darts XGBModel returned by darts_pipeline
-importances = xgb_model.model.feature_importances_          # from XGBoost
-feat_names = xgb_model.lagged_feature_names                # from Darts (public attr)
-
-fi = (
-    pd.DataFrame({"feature": feat_names, "importance": importances})
-    .sort_values("importance", ascending=False)
-    .reset_index(drop=True)
-)
-
-# print(fi.head(30))
-
-fi_grouped = (
-    fi.assign(
-        base_feature=lambda df: (
-            df["feature"]
-            .str.replace(r"_(target|pastcov|futcov)_lag-?\d+$", "", regex=True)
-            .str.replace(r"_statcov_target_.*$", "", regex=True)
-        )
+# Local SHAP for the final XGB sigmoid forecast
+# how much past history
+xgb_shap_history = max(
+    abs(min(lags))
+    for lags in (
+        xgb_model_sigmoid._get_lags("target"),
+        xgb_model_sigmoid._get_lags("past"),
+        xgb_model_sigmoid._get_lags("future"),
     )
-    .groupby("base_feature", as_index=False)["importance"]
-    .sum()
-    .sort_values("importance", ascending=False)
-    .reset_index(drop=True)
+    if lags
 )
 
-print(fi_grouped.head(10))
-
-
-# %%
-# xgb_model is the fitted Darts XGBModel returned by darts_pipeline
-importances = xgb_model_sigmoid.model.feature_importances_          # from XGBoost
-feat_names = xgb_model_sigmoid.lagged_feature_names                # from Darts (public attr)
-
-fi = (
-    pd.DataFrame({"feature": feat_names, "importance": importances})
-    .sort_values("importance", ascending=False)
-    .reset_index(drop=True)
-)
-
-# print(fi.head(30))
-
-fi_grouped = (
-    fi.assign(
-        base_feature=lambda df: (
-            df["feature"]
-            .str.replace(r"_(target|pastcov|futcov)_lag-?\d+$", "", regex=True)
-            .str.replace(r"_statcov_target_.*$", "", regex=True)
-        )
-    )
-    .groupby("base_feature", as_index=False)["importance"]
-    .sum()
-    .sort_values("importance", ascending=False)
-    .reset_index(drop=True)
-)
-
-print(fi_grouped.head(10))
-
-# %%
-# SHAP for the fitted XGB custom-loss model
-# `xgb_model_sigmoid` is the last walk-forward model, which is fit on all
-# observations except the final test point.
-xgb_shap_series = TimeSeries.from_series(y.iloc[:-1])
-xgb_shap_past_covariates = TimeSeries.from_dataframe(X.iloc[:-1])
-
+# background data gives SHAP a reference distribution of lagged inputs.
 xgb_shap_explainer = ShapExplainer(
     model=xgb_model_sigmoid,
-    background_series=xgb_shap_series,
-    background_past_covariates=xgb_shap_past_covariates,
+    background_series=TimeSeries.from_series(y.iloc[:-1]),
+    background_past_covariates=TimeSeries.from_dataframe(X.iloc[:-1]),
     background_num_samples=200,
     shap_method="permutation",
-    max_evals=2 * len(xgb_model_sigmoid.lagged_feature_names) + 1,
+    seed=42,
+    max_evals=10 * (2 * len(xgb_model_sigmoid.lagged_feature_names) + 1),
 )
 
-xgb_shap_result = xgb_shap_explainer.explain(horizons=[1])
-xgb_shap_ts = xgb_shap_result.get_explanation(horizon=1)
-xgb_shap_df = xgb_shap_ts.to_dataframe(copy=False)
-
-xgb_shap_mean_abs = (
-    xgb_shap_df.abs()
-    .mean()
-    .rename("mean_abs_shap")
+# explain the last forecast
+xgb_shap_local = (
+    xgb_shap_explainer.explain(
+        foreground_series=TimeSeries.from_series(y.iloc[-xgb_shap_history - 1 : -1]),
+        foreground_past_covariates=TimeSeries.from_dataframe(X.iloc[-xgb_shap_history - 1 : -1]),
+        horizons=[1],
+    )
+    .get_explanation(horizon=1)
+    .to_dataframe(copy=False)
+    .iloc[0]
+    .rename("shap_value")
     .reset_index()
     .rename(columns={"index": "feature"})
-    .sort_values("mean_abs_shap", ascending=False)
-    .reset_index(drop=True)
 )
 
-xgb_shap_grouped = (
-    xgb_shap_mean_abs.assign(
+xgb_shap_local["abs_shap"] = xgb_shap_local["shap_value"].abs()
+xgb_shap_local = xgb_shap_local.sort_values("abs_shap", ascending=False).reset_index(drop=True)
+
+# group together
+xgb_shap_local_grouped = (
+    xgb_shap_local.assign(
         base_feature=lambda df: (
             df["feature"]
             .str.replace(r"_(target|pastcov|futcov)_lag-?\d+$", "", regex=True)
             .str.replace(r"_statcov_target_.*$", "", regex=True)
         )
     )
-    .groupby("base_feature", as_index=False)["mean_abs_shap"]
-    .sum()
-    .sort_values("mean_abs_shap", ascending=False)
+    .groupby("base_feature", as_index=False)
+    .agg(
+        shap_value=("shap_value", "sum"),
+        abs_shap=("abs_shap", "sum"),
+    )
+    .sort_values("abs_shap", ascending=False)
     .reset_index(drop=True)
 )
 
-print(xgb_shap_grouped.head(10))
-xgb_shap_explainer.summary_plot(horizons=[1], num_samples=200, plot_type="bar")
-
-# %%
+print(xgb_shap_local_grouped.head(10))

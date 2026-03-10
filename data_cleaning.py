@@ -13,7 +13,7 @@ from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 # %% import
 REPO_ROOT = Path(__file__).parent
 df = pd.read_csv(REPO_ROOT / "dataset_building" / "cleaned_dataset.csv")
-# %% Check Data Types
+# %%
 df['date'] = pd.to_datetime(df['date']).dt.date
 #check dtype of each column
 print(df.dtypes)
@@ -55,8 +55,8 @@ TO_DROP = ["regis_cat_a","regis_cat_b","bidding","year"] #drop some things. regi
 df.drop(columns=TO_DROP, inplace=True)
 #lag 3 for data released 1 month late
 NN_LAG_3 = [c for c in df.columns if c.startswith("cpi_")] + ["regis_cat_a_growth_rate","regis_cat_b_growth_rate","total_cars_cat_a_growth_rate","total_cars_cat_b_growth_rate","deregis_cat_a", "deregis_cat_a_growth_rate","total_cars_cat_a","total_cars_cat_b"]
-NN_FORWARD_1 = ['quota_per_bid', 'quota_per_bid_growth_rate']
-NN_LAG_1 = ['pqp_cat_a','pqp_cat_b','pqp_cat_a_growth_rate','pqp_cat_b_growth_rate']
+NN_FORWARD_1 = ['quota_per_bid', 'quota_per_bid_growth_rate'] #have contemp data
+NN_LAG_1 = ['pqp_cat_a','pqp_cat_b','pqp_cat_a_growth_rate','pqp_cat_b_growth_rate'] # 2 week lag
 
 df_nn = add_lag_columns(df, NN_LAG_3, lags=3)
 df_nn = add_lag_columns(df_nn, NN_FORWARD_1, lags=-1)
@@ -66,7 +66,7 @@ df_nn = add_lag_columns(df_nn, NN_LAG_1, lags=1)
 df_nn["date"] = pd.to_datetime(df_nn["date"])
 df_nn = df_nn[df_nn["date"] >= pd.to_datetime("2003-01-01")]
 
-#%%
+#%% drop missing values
 missing_cols_nn = df_nn.columns[df_nn.isnull().any()]
 missing_percent_nn = df_nn[missing_cols_nn].isnull().mean() * 100
 print("Percentage of missing values in df_nn:\n", missing_percent_nn)
@@ -156,101 +156,3 @@ plot_scatter_against_quota_premium(
 #graphs not very useful, just show correlation matrix
 # %%
 df_nn.to_csv(REPO_ROOT / "final_dataset_nn.csv", index=False)
-# %%
-
-# df.to_csv(REPO_ROOT / "final_dataset.csv", index=False)
-
-#pqp_cat_a and pqp_cat_b, entire column shift up 2 rows (1 month)
-# df["pqp_cat_a"] = df["pqp_cat_a"].shift(-2)
-# df["pqp_cat_b"] = df["pqp_cat_b"].shift(-2)
-# df["pqp_cat_a_growth_rate"] = df["pqp_cat_a_growth_rate"].shift(-2)
-# df["pqp_cat_b_growth_rate"] = df["pqp_cat_b_growth_rate"].shift(-2)
-#=================Detailed manipulation of columns=================
-#%%
-#Create 10 years to 11 years ago columns for registration, as they can be indicator for future supply of quota
-
-#create a fixed_date 
-# dates = pd.date_range(end="2026-01-15", periods=len(df), freq="SMS")  # 1st + 15th
-# df["date_fixed"] = dates[::-1].to_numpy()  # top row = 2026-01-15
-
-# n = len(df)
-# skip_months = pd.PeriodIndex(["2020-04", "2020-05", "2020-06"], freq="M")
-
-# periods = n + 24  # buffer to account for skipped dates
-# while True:
-#     arr = pd.date_range(end="2026-01-15", periods=periods, freq="SMS")[::-1]  # top: 2026-01-15
-#     arr = arr[~arr.to_period("M").isin(skip_months)]
-#     if len(arr) >= n:
-#         df["date_fixed"] = arr[:n].to_numpy()
-#         break
-#     periods += 24
-
-# df["date_fixed"] = pd.to_datetime(df["date_fixed"])
-
-# # lookup: date_fixed -> regis_cat_a
-# lookup = (
-#     df[["date_fixed", "regis_cat_a"]]
-#     .set_index("date_fixed")["regis_cat_a"]
-# )
-
-# # 10y0m to 11y0m ago (inclusive)
-# for total_months in range(10 * 12, 10 * 12 + 1):
-#     years, months = divmod(total_months, 12)
-#     col = f"regis_cat_a_{years}_year_{months}_months_ago"
-
-#     shifted_dates = df["date_fixed"] - pd.DateOffset(years=years, months=months)
-#     df[col] = shifted_dates.map(lookup)
-
-# # lookup: date_fixed -> regis_cat_b
-# lookup_b = df.set_index("date_fixed")["regis_cat_b"]
-
-# # 9y0m to 11y2m ago (inclusive)
-# for total_months in range(9 * 12, 11 * 12 + 2 + 1):
-#     years, months = divmod(total_months, 12)
-#     col = f"regis_cat_b_{years}_year_{months}_months_ago"
-#     shifted_dates = df["date_fixed"] - pd.DateOffset(years=years, months=months)
-#     df[col] = shifted_dates.map(lookup_b)
-#%% Data structure for NN
-# NN_NO_LAG = ['quota_per_bid', 'quota_per_bid_growth_rate', 'pqp_cat_a_growth_rate', 'pqp_cat_b_growth_rate','date'] 
-# NN_LAG_2 = ['gtrends_coe', 'gtrends_sgcarmart']
-# NN_LAG_3 = [c for c in df.columns if c.startswith("cpi_")] + ["regis_cat_a_growth_rate","regis_cat_b_growth_rate","total_cars_cat_a_growth_rate","total_cars_cat_b_growth_rate"]
-# NN_LAG_1 = [c for c in df.columns if c not in NN_NO_LAG and c not in NN_LAG_3 and c not in NN_LAG_2]
-
-
-# df_nn = add_lag_columns(df, NN_LAG_1, lags=1)
-# df_nn = add_lag_columns(df_nn, NN_LAG_2, lags=2)
-# df_nn = add_lag_columns(df, NN_LAG_3, lags=3)
-# df_nn = add_lag_columns(df_nn, NN_FORWARD_1, lags=-1)
-
-# #%%
-# NO_LAG = ["quota_per_bid", "quota_per_bid_growth_rate", "pqp_cat_a_growth_rate", "pqp_cat_b_growth_rate"]
-
-# LAG_1 = [c for c in df.columns if c.startswith("policy_")]
-
-# LAG_2_4_6 = ['gtrends_coe', 'gtrends_sgcarmart']
-
-# LAG_1_TO_6 = ["quota","quota_premium","quota_premium_growth_rate","overdemand_growth_rate","quota_cat_b","quota_premium_cat_b_growth_rate","overdemand_cat_b_growth_rate","sora_1m","sti_close","sti_close_growth_rate","cat_a_divide_cat_b"]
-
-# LAG_4_6 = ["regis_cat_a_growth_rate","regis_cat_b_growth_rate","total_cars_cat_a_growth_rate","total_cars_cat_b_growth_rate"] + [c for c in df.columns if c.startswith("cpi_")]
-
-
-# #%%
-# # Add lagged columns
-# df = add_lag_columns(df, LAG_1, lags=1)
-# df = add_lag_columns(df, LAG_2_4_6, lags=[2, 4, 6])
-# df = add_lag_columns(df, LAG_1_TO_6, lags=(1, 6))
-# df = add_lag_columns(df, LAG_4_6, lags=[4, 6])
-# df = add_lag_columns(df, ["quota_per_bid","quota_per_bid_growth_rate"], lags=6, keep_original= ["quota_per_bid","quota_per_bid_growth_rate"])
-# df = add_lag_columns(df, ["pqp_cat_a_growth_rate","pqp_cat_b_growth_rate"], lags=[2,4,6], keep_original=["pqp_cat_a_growth_rate","pqp_cat_b_growth_rate"])
-# %%
-# #columns with missing values, and percentage of missing values
-# missing_cols = df.columns[df.isnull().any()]
-# missing_percent = df[missing_cols].isnull().mean() * 100
-# print("Percentage of missing values:\n", missing_percent)
-
-# #drop columns with more than 50% missing values
-# df = df.drop(columns=missing_percent[missing_percent > 50].index)
-
-# %% plot quota_premium and quota_per_bid vs date
-#correlation matrix table
-
