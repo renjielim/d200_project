@@ -26,4 +26,20 @@ python -m ipykernel install --user --name d200 --display-name "Python (d200)"
 ```
 
 ### 3) Run the code
-All the csv used, the code to clean and build the dataset, and the final dataset are all in the folder dataset_building
+Run the project in this order:
+
+1. Build the dataset:
+   The raw CSV files and dataset-building scripts are in `dataset_building/`.
+   Running `dataset_building/dataset_building.py` produces `dataset_building/cleaned_dataset.csv`.
+
+2. Clean and engineer features:
+   Run `data_cleaning.py` to do the additional feature engineering and exploratory analysis.
+   This produces the analysis dataset `final_dataset_nn.csv`.
+
+3. Train and evaluate the main models:
+   Run `analysis.py`.
+   On a MacBook Air M1, this takes roughly 1.5 hours.
+
+4. Fine-tune Chronos:
+   Chronos fine-tuning was run on CSD3 rather than locally.
+   The relevant scripts and outputs are in `chronos_fine_tune/`.
