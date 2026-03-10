@@ -11,22 +11,17 @@ import torch.nn as nn
 
 from darts import TimeSeries
 from darts.dataprocessing.transformers import Scaler
+from darts.explainability.shap_explainer import ShapExplainer
 from darts.models import (
     AutoARIMA,
-    BlockRNNModel,
     NaiveSeasonal,
     RandomForestModel,
     SKLearnModel,
-    TiDEModel,
-    TSMixerModel,
     XGBModel,
 )
-from darts.models.forecasting.block_rnn_model import CustomBlockRNNModule
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from scipy.stats import wilcoxon
 from sklearn.linear_model import ElasticNet
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.svm import SVR
 
 from functions.analysis_functions import (
@@ -181,6 +176,7 @@ xgb_base_params = dict(
     reg_lambda=1.0,
     reg_alpha=0.1,
     random_state=42,
+    objective="reg:absoluteerror"
 )
 
 xgb_param_grid = {
@@ -217,6 +213,7 @@ rf_base_params = dict(
     min_samples_leaf=2,
     max_features="sqrt",
     random_state=42,
+    criterion="absolute_error"
 )
 
 rf_param_grid = {
@@ -365,13 +362,13 @@ arima_pred_levels = prev_levels_test * (1 + arima_pred / 100)
 
 xgb_plot = plot_test(
     y_true=actual_levels_test,
-    y_pred=xgb_pred_levels,
-    y_pred_2=xgb_pred_sigmoid_levels,
-    title="XGB: Actual vs Predicted Levels",
+    y_pred=arima_pred_levels,
+    y_pred_2=rw_pred,
+    title="Actual vs Predicted Levels for ARIMa and RW",
     xlabel="Time",
     ylabel="Quota Premium",
-    y_pred_label="XGB",
-    y_pred_2_label="XGB Custom Loss",
+    y_pred_label="ARIMA",
+    y_pred_2_label="Random Walk",
     date_real=date_real
 )
 
@@ -401,6 +398,8 @@ plot_profit_curves_sigmoid(
         "ARIMA": {"preds": arima_pred_levels, "color": "tab:red"},
     },
     base_margin=2000)
+
+#%% profit curve for different margins
 # %%
 profit_xgb = mean_expected_profit_sigmoid(
     actual=actual_levels_test,
@@ -408,7 +407,11 @@ profit_xgb = mean_expected_profit_sigmoid(
     prev_levels=prev_levels_test,
     steepness=0.0005,
     base_margin=2000,
+    full_list=True
 )
+
+mean_profit_xgb = np.mean(profit_xgb)
+
 profit_xgb_sigmoid = mean_expected_profit_sigmoid(
     actual=actual_levels_test,
     pred=xgb_pred_sigmoid_levels,
@@ -417,6 +420,8 @@ profit_xgb_sigmoid = mean_expected_profit_sigmoid(
     base_margin=2000,
     full_list=True
 )
+mean_profit_xgb_sigmoid = np.mean(profit_xgb_sigmoid)
+
 profit_rw = mean_expected_profit_sigmoid(
     actual=actual_levels_test,
     pred=rw_pred,
@@ -425,6 +430,8 @@ profit_rw = mean_expected_profit_sigmoid(
     base_margin=2000,
     full_list=True
 )
+mean_profit_rw = np.mean(profit_rw)
+
 profit_arima = mean_expected_profit_sigmoid(
     actual=actual_levels_test,
     pred=arima_pred_levels,
@@ -433,6 +440,7 @@ profit_arima = mean_expected_profit_sigmoid(
     base_margin=2000,
     full_list=True
 )
+mean_profit_arima = np.mean(profit_arima)
 
 # %%
 # 1. Calculate the difference in profit for each auction
@@ -440,8 +448,6 @@ d = np.array(profit_xgb) - np.array(profit_rw)
 constant = np.ones(len(d))
 model = sm.OLS(endog=d, exog=constant)
 hac_results = model.fit(cov_type='HAC', cov_kwds={'maxlags': 1})
-
-# 4. Extract the Diebold-Mariano Statistic and P-Value
 dm_stat = hac_results.tvalues[0]
 p_value = hac_results.pvalues[0]
 
@@ -449,13 +455,6 @@ print(f"Mean Profit Difference (XGB - RW): ${d.mean():.2f}")
 print(f"Diebold-Mariano Statistic: {dm_stat:.4f}")
 print(f"P-Value: {p_value:.4f}")
 
-# %% wilcoxon signed-rank test (non-parametric alternative to DM test)
-# Calculate the profit differences
-d = np.array(profit_xgb_sigmoid) - np.array(profit_rw)
-# Perform the Wilcoxon signed-rank test
-statistic, p_value = wilcoxon(d, alternative='two-sided')
-print(f"Wilcoxon signed-rank test statistic: {statistic:.4f}")
-print(f"P-Value: {p_value:.4f}")
 
 # %%
 # xgb_model is the fitted Darts XGBModel returned by darts_pipeline
@@ -468,7 +467,99 @@ fi = (
     .reset_index(drop=True)
 )
 
-print(fi.head(30))
+# print(fi.head(30))
 
+fi_grouped = (
+    fi.assign(
+        base_feature=lambda df: (
+            df["feature"]
+            .str.replace(r"_(target|pastcov|futcov)_lag-?\d+$", "", regex=True)
+            .str.replace(r"_statcov_target_.*$", "", regex=True)
+        )
+    )
+    .groupby("base_feature", as_index=False)["importance"]
+    .sum()
+    .sort_values("importance", ascending=False)
+    .reset_index(drop=True)
+)
+
+print(fi_grouped.head(10))
+
+
+# %%
+# xgb_model is the fitted Darts XGBModel returned by darts_pipeline
+importances = xgb_model_sigmoid.model.feature_importances_          # from XGBoost
+feat_names = xgb_model_sigmoid.lagged_feature_names                # from Darts (public attr)
+
+fi = (
+    pd.DataFrame({"feature": feat_names, "importance": importances})
+    .sort_values("importance", ascending=False)
+    .reset_index(drop=True)
+)
+
+# print(fi.head(30))
+
+fi_grouped = (
+    fi.assign(
+        base_feature=lambda df: (
+            df["feature"]
+            .str.replace(r"_(target|pastcov|futcov)_lag-?\d+$", "", regex=True)
+            .str.replace(r"_statcov_target_.*$", "", regex=True)
+        )
+    )
+    .groupby("base_feature", as_index=False)["importance"]
+    .sum()
+    .sort_values("importance", ascending=False)
+    .reset_index(drop=True)
+)
+
+print(fi_grouped.head(10))
+
+# %%
+# SHAP for the fitted XGB custom-loss model
+# `xgb_model_sigmoid` is the last walk-forward model, which is fit on all
+# observations except the final test point.
+xgb_shap_series = TimeSeries.from_series(y.iloc[:-1])
+xgb_shap_past_covariates = TimeSeries.from_dataframe(X.iloc[:-1])
+
+xgb_shap_explainer = ShapExplainer(
+    model=xgb_model_sigmoid,
+    background_series=xgb_shap_series,
+    background_past_covariates=xgb_shap_past_covariates,
+    background_num_samples=200,
+    shap_method="permutation",
+    max_evals=2 * len(xgb_model_sigmoid.lagged_feature_names) + 1,
+)
+
+xgb_shap_result = xgb_shap_explainer.explain(horizons=[1])
+xgb_shap_ts = xgb_shap_result.get_explanation(horizon=1)
+xgb_shap_df = xgb_shap_ts.to_dataframe(copy=False)
+
+xgb_shap_mean_abs = (
+    xgb_shap_df.abs()
+    .mean()
+    .rename("mean_abs_shap")
+    .reset_index()
+    .rename(columns={"index": "feature"})
+    .sort_values("mean_abs_shap", ascending=False)
+    .reset_index(drop=True)
+)
+
+xgb_shap_grouped = (
+    xgb_shap_mean_abs.assign(
+        base_feature=lambda df: (
+            df["feature"]
+            .str.replace(r"_(target|pastcov|futcov)_lag-?\d+$", "", regex=True)
+            .str.replace(r"_statcov_target_.*$", "", regex=True)
+        )
+    )
+    .groupby("base_feature", as_index=False)["mean_abs_shap"]
+    .sum()
+    .sort_values("mean_abs_shap", ascending=False)
+    .reset_index(drop=True)
+)
+
+print(xgb_shap_grouped.head(10))
+xgb_shap_explainer.summary_plot(horizons=[1], num_samples=200, plot_type="bar")
 
 # %%
