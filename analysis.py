@@ -29,7 +29,7 @@ from functions.analysis_functions import (
 
 # %% import
 REPO_ROOT = Path(__file__).parent
-df_nn = pd.read_csv(REPO_ROOT / "final_dataset_nn.csv")
+df_nn = pd.read_csv(REPO_ROOT / "final_dataset.csv")
 df_nn["date"] = pd.to_datetime(df_nn["date"])
 df_nn = df_nn.sort_values("date").set_index("date")
 cols_to_fill = df_nn.columns.difference(['quota_per_bid_lag_-1', 'quota_per_bid_growth_rate_lag_-1'])
@@ -119,6 +119,8 @@ rw_pred, rw_model = darts_pipeline(
 
 rw_rmse = root_mean_squared_error(actual_levels_test.loc[rw_pred.index], rw_pred)
 rw_mae = mean_absolute_error(actual_levels_test.loc[rw_pred.index], rw_pred)
+
+print(f"Random Walk MAE: {rw_mae:.4f}, RMSE: {rw_rmse:.4f}")
 
 #MAE: 3590.2917 RMSE: 4694.0878 for last 48
 #MAE: 3823.1146 RMSE: 5209.9593 for all 96
@@ -347,6 +349,8 @@ eval_df = pd.concat(
     [arima_eval, enet_eval, xgb_eval, rf_eval, svr_eval, xgb_eval_sigmoid, chronos_eval],
     ignore_index=True,
 )
+
+print(eval_df)
 #%%
 xgb_pred_levels = prev_levels_test * (1 + xgb_pred / 100)
 xgb_pred_sigmoid_levels = prev_levels_test * (1 + xgb_pred_sigmoid / 100)
@@ -354,23 +358,22 @@ arima_pred_levels = prev_levels_test * (1 + arima_pred / 100)
 
 xgb_plot = plot_test(
     y_true=actual_levels_test,
-    y_pred=arima_pred_levels,
+    y_pred=xgb_pred_levels,
     y_pred_2=rw_pred,
-    title="Actual vs Predicted Levels for ARIMa and RW",
+    title="Actual vs Predicted Levels for XGB and RW",
     xlabel="Time",
     ylabel="Quota Premium",
-    y_pred_label="ARIMA",
+    y_pred_label="XGB",
     y_pred_2_label="Random Walk",
     date_real=date_real
 )
 
 
 #%%
-diebold_mariano_test(actual_levels_test, xgb_pred_levels, rw_pred, loss='abs')
-diebold_mariano_test(actual_levels_test, xgb_pred_levels, arima_pred_levels, loss='abs')
-
-diebold_mariano_test(actual_levels_test, xgb_pred_sigmoid_levels, rw_pred, loss='abs')
-diebold_mariano_test(actual_levels_test, xgb_pred_sigmoid_levels, arima_pred_levels, loss='abs')
+print(f"DM Test XGB vs RW: p-value = {diebold_mariano_test(actual_levels_test, xgb_pred_levels, rw_pred, loss='abs')[1]:.4f}")
+print(f"DM Test XGB vs ARIMA: p-value = {diebold_mariano_test(actual_levels_test, xgb_pred_levels, arima_pred_levels, loss='abs')[1]:.4f}")
+print(f"DM Test XGB Custom Loss vs RW: p-value = {diebold_mariano_test(actual_levels_test, xgb_pred_sigmoid_levels, rw_pred, loss='abs')[1]:.4f}")
+print(f"DM Test XGB Custom Loss vs ARIMA: p-value = {diebold_mariano_test(actual_levels_test, xgb_pred_sigmoid_levels, arima_pred_levels, loss='abs')[1]:.4f}")
 
 # %%
 plot_profit_curves_sigmoid(
@@ -435,10 +438,22 @@ hac_results = model.fit(cov_type='HAC', cov_kwds={'maxlags': 1})
 dm_stat = hac_results.tvalues[0]
 p_value = hac_results.pvalues[0]
 
-print(f"Mean Profit Difference (XGB - RW): ${d.mean():.2f}")
+print(f"Mean Profit Difference (XGB_sigmoid - RW): ${d.mean():.2f}")
+print(f"Percentage Profit Improvement: {(mean_profit_xgb_sigmoid - mean_profit_rw) / abs(mean_profit_rw) * 100:.2f}%")
 print(f"Diebold-Mariano Statistic: {dm_stat:.4f}")
 print(f"P-Value: {p_value:.4f}")
 
+d = np.array(profit_xgb) - np.array(profit_rw)
+constant = np.ones(len(d))
+model = sm.OLS(endog=d, exog=constant)
+hac_results = model.fit(cov_type='HAC', cov_kwds={'maxlags': 1})
+dm_stat = hac_results.tvalues[0]
+p_value = hac_results.pvalues[0]
+
+print(f"Mean Profit Difference (XGB - RW): ${d.mean():.2f}")
+print(f"Percentage Profit Improvement: {(mean_profit_xgb - mean_profit_rw) / abs(mean_profit_rw) * 100:.2f}%")
+print(f"Diebold-Mariano Statistic: {dm_stat:.4f}")
+print(f"P-Value: {p_value:.4f}")
 
 
 # %%
@@ -500,5 +515,7 @@ xgb_shap_local_grouped = (
     .sort_values("abs_shap", ascending=False)
     .reset_index(drop=True)
 )
+print("SHAP values for XGB_sigmoid/custom loss:")
+print(xgb_shap_local_grouped.head(5))
 
-print(xgb_shap_local_grouped.head(10))
+# %%

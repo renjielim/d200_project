@@ -31,10 +31,10 @@ class TrainLossPrinter(Callback):
 
 def main() -> None:
     repo_root = PROJECT_ROOT
-    out_dir = repo_root / "logs"
+    out_dir = repo_root / "chronos_fine_tune"
     out_dir.mkdir(exist_ok=True)
 
-    df_nn = pd.read_csv(repo_root / "final_dataset_nn.csv")
+    df_nn = pd.read_csv(repo_root / "final_dataset.csv")
     df_nn["date"] = pd.to_datetime(df_nn["date"])
     df_nn = df_nn.sort_values("date").set_index("date")
 

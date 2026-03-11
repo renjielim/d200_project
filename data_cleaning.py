@@ -16,14 +16,7 @@ df = pd.read_csv(REPO_ROOT / "dataset_building" / "cleaned_dataset.csv")
 # %%
 df['date'] = pd.to_datetime(df['date']).dt.date
 #check dtype of each column
-print(df.dtypes)
-
-#%%
-#summary statistics of quota_premium_growth_rate
-print(df["quota_premium_growth_rate"].describe())
-print(df["quota_premium_growth_rate"].nlargest(10))
-print(df["quota_premium_growth_rate"].nsmallest(10))
-print(df['overdemand_growth_rate'].nsmallest(10))
+# print(df.dtypes)
 
 #%%
 #winsorise the quota_premium_growth_rate at 0.5% and 99.5% (around 3 data points on each side, all during 2008)
@@ -42,13 +35,13 @@ df["quota_premium_cat_b_growth_rate"] = np.where(df["quota_premium_cat_b_growth_
 df["cat_a_divide_cat_b"] = df["quota_premium"] / df["quota_premium_cat_b"]
 
 #%% ADF for every column in df except the first 3 columns
-for col in df.columns[3:]:
-    result = adfuller(df[col].dropna())
-    print(f"Column: {col}")
-    print("ADF Statistic: %f" % result[0])
-    print("p-value: %f" % result[1])
-    print("Used lag:", result[2])
-    print("-" * 30)
+# for col in df.columns[3:]:
+#     result = adfuller(df[col].dropna())
+#     print(f"Column: {col}")
+#     print("ADF Statistic: %f" % result[0])
+#     print("p-value: %f" % result[1])
+#     print("Used lag:", result[2])
+#     print("-" * 30)
 
 #%% Align columns
 TO_DROP = ["regis_cat_a","regis_cat_b","bidding","year"] #drop some things. regis idw anymore because im not doing more than 1 step ahead, so deregis data is enough
@@ -69,7 +62,7 @@ df_nn = df_nn[df_nn["date"] >= pd.to_datetime("2003-01-01")]
 #%% drop missing values
 missing_cols_nn = df_nn.columns[df_nn.isnull().any()]
 missing_percent_nn = df_nn[missing_cols_nn].isnull().mean() * 100
-print("Percentage of missing values in df_nn:\n", missing_percent_nn)
+# print("Percentage of missing values in df_nn:\n", missing_percent_nn)
 df_nn = df_nn.drop(columns=missing_percent_nn[missing_percent_nn > 60].index)
 
 #%%#=================EDA=================
@@ -125,34 +118,34 @@ plt.show()
 #no signs of seasonality
 
 #%%
-plot_quota_premium_vs_column(
-    df_eda,
-    right_col="quota_per_bid",
-    title="Quota Premium vs quota per bid",
-    right_label="Quota per Bid",
-)
+# plot_quota_premium_vs_column(
+#     df_eda,
+#     right_col="quota_per_bid",
+#     title="Quota Premium vs quota per bid",
+#     right_label="Quota per Bid",
+# )
 
-plot_quota_premium_vs_column(
-    df_eda,
-    left_col="quota_premium",
-    right_col="quota_premium_growth_rate",
-    title="Quota Premium and growth rate",
-)
+# plot_quota_premium_vs_column(
+#     df_eda,
+#     left_col="quota_premium",
+#     right_col="quota_premium_growth_rate",
+#     title="Quota Premium and growth rate",
+# )
 
-plot_scatter_against_quota_premium(
-    df_eda,
-    y_col="quota_premium_growth_rate",
-    x_col="cat_a_divide_cat_b_lag_1",
-    title="Quota Premium vs Cat A Divide Cat B (Lag 1)",
-)
+# plot_scatter_against_quota_premium(
+#     df_eda,
+#     y_col="quota_premium_growth_rate",
+#     x_col="cat_a_divide_cat_b_lag_1",
+#     title="Quota Premium vs Cat A Divide Cat B (Lag 1)",
+# )
 
-plot_scatter_against_quota_premium(
-    df_eda,
-    y_col="quota_premium_growth_rate",
-    x_col="overdemand_growth_rate_lag_1",
-    title="Quota Premium vs Overdemand Growth Rate (Lag 1)",
-)
+# plot_scatter_against_quota_premium(
+#     df_eda,
+#     y_col="quota_premium_growth_rate",
+#     x_col="overdemand_growth_rate_lag_1",
+#     title="Quota Premium vs Overdemand Growth Rate (Lag 1)",
+# )
 
 #graphs not very useful, just show correlation matrix
 # %%
-df_nn.to_csv(REPO_ROOT / "final_dataset_nn.csv", index=False)
+df_nn.to_csv(REPO_ROOT / "final_dataset.csv", index=False)

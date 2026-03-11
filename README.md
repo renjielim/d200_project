@@ -8,7 +8,6 @@ From the project root:
 ```bash
 python3.10 -m venv d200
 source d200/bin/activate
-python -m pip install --upgrade pip
 ```
 
 ### 2) Install dependencies
@@ -26,20 +25,39 @@ python -m ipykernel install --user --name d200 --display-name "Python (d200)"
 ```
 
 ### 3) Run the code
-Run the project in this order:
+1. To just reproduce the main results, run:
 
-1. Build the dataset:
-   The raw CSV files and dataset-building scripts are in `dataset_building/`.
-   Running `dataset_building/dataset_building.py` produces `dataset_building/cleaned_dataset.csv`.
+   ```bash
+   python analysis.py
+   ```
 
-2. Clean and engineer features:
-   Run `data_cleaning.py` to do the additional feature engineering and exploratory analysis.
-   This produces the analysis dataset `final_dataset_nn.csv`.
+   This uses the committed analysis dataset `final_dataset.csv` and the committed Chronos predictions in `chronos_fine_tune/chronos_finetune_preds.csv`.
+   On a MacBook Air M1, `analysis.py` takes roughly 1 hour. Or do it on a VS Code interactive interface that uses #%%, which was what I did.
 
-3. Train and evaluate the main models:
-   Run `analysis.py`.
-   On a MacBook Air M1, this takes roughly 1.5 hours.
+2. To rebuild the dataset from the raw files first, run:
 
-4. Fine-tune Chronos:
-   Chronos fine-tuning was run on CSD3 rather than locally.
-   The relevant scripts and outputs are in `chronos_fine_tune/`.
+   ```bash
+   python dataset_building/dataset_building.py
+   python data_cleaning.py
+   python analysis.py
+   ```
+
+   Notes:
+   `dataset_building/dataset_building.py` reads the raw files in `dataset_building/` and writes `dataset_building/cleaned_dataset.csv`.
+   It also downloads STI data from Yahoo Finance, so this step requires network access.
+   `data_cleaning.py` performs the additional feature engineering, and exploratory analysis, and produces `final_dataset.csv`.
+
+3. Chronos fine-tuning:
+   Chronos fine-tuning was run on CSD3 rather than locally. To rerun it on CSD3:
+
+   ```bash
+   sbatch chronos_fine_tune/chronos.slurm
+   ```
+
+   The fine-tuning script `chronos_fine_tune/cronos_finetune.py` writes fresh outputs to:
+   `chronos_fine_tune/chronos_finetune_preds.csv`
+   `chronos_fine_tune/chronos_finetune_eval.csv`
+
+   Note:
+   `analysis.py` currently reads the committed file `chronos_fine_tune/chronos_finetune_preds.csv`.
+   Might need to install the venv again on CSD3 and edit slurm a little for it to work
