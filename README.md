@@ -31,8 +31,8 @@ python -m ipykernel install --user --name d200 --display-name "Python (d200)"
    python analysis.py
    ```
 
-   This uses the committed analysis dataset `final_dataset.csv` and the committed Chronos predictions in `chronos_fine_tune/chronos_finetune_preds.csv`.
-   On a MacBook Air M1, `analysis.py` takes roughly 1 hour. Or do it on a VS Code interactive interface that uses #%%, which was what I did.
+   This uses the cleaned analysis dataset `final_dataset.csv` and the committed Chronos predictions in `chronos_fine_tune/chronos_finetune_preds.csv`.
+   On a MacBook Air M1, `analysis.py` takes roughly 1 hour. Or run a subset of it on a VS Code interactive interface that uses #%%, which was what I did.
 
 2. To rebuild the dataset from the raw files first, run:
 
@@ -44,7 +44,7 @@ python -m ipykernel install --user --name d200 --display-name "Python (d200)"
 
    Notes:
    `dataset_building/dataset_building.py` reads the raw files in `dataset_building/` and writes `dataset_building/cleaned_dataset.csv`.
-   It also downloads STI data from Yahoo Finance, so this step requires network access.
+   It also downloads STI data from Yahoo Finance.
    `data_cleaning.py` performs the additional feature engineering, and exploratory analysis, and produces `final_dataset.csv`.
 
 3. Chronos fine-tuning:
